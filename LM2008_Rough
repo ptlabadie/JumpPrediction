@@ -1,0 +1,147 @@
+library('tidyverse')
+library('dplyr')
+library('sas7bdat')
+library('hms')
+library('highfrequency')
+if(!require(tbl2xts)) install.packages("tbl2xts")
+if(!require(rmsfuns)) install.packages("rmsfuns")
+rm(list=ls())
+#dev.off()
+
+
+#Import data
+data <- read.sas7bdat("C:/Users/Patrick/Documents/Current Semester/SAS/taq_fb.sas7bdat")
+
+#formate dates/times
+data$timeround <- as.hms(data$timeround)
+data$TIME_M <- as.hms(data$TIME_M)library('tidyverse')
+library('dplyr')
+library('sas7bdat')
+library('hms')
+library('zoo')
+library('highfrequency')
+if(!require(tbl2xts)) install.packages("tbl2xts")
+if(!require(rmsfuns)) install.packages("rmsfuns")
+rm(list=ls())
+dev.off()
+
+
+#Import data
+load('Final.RData')
+
+###################################################################################################################################################################
+#Midpoint vs. executed trade price???? 
+#Executed trade price per minute using TAQ data, must be accessed through SAS
+
+#Create midpoint price
+data <- data %>% 
+  mutate(midpoint = (BID + ASK)/2)
+###################################################################################################################################################################
+
+
+
+
+###################################################################################################################################################################
+#Lee & Mykland Jump test
+#Either LM, BNS, or Price movement, same model. Use y as placeholder in code
+###################################################################################################################################################################
+
+#Realized Bipower Variation 
+#K rolling window : As suggested by Lee & Mykland
+
+
+#√ 252 × nobs where nobs = 
+K= 600
+#data$RV <- abs(log(midpoint/lag(midpoint)) * abs(log(lag(midpoint)/lag(midpoint,n = 2L))))
+
+data <- data %>% 
+  group_by(data$SYM_ROOT) %>% 
+  mutate(RV = abs(log(midpoint/lag(midpoint)) * abs(log(lag(midpoint)/lag(midpoint,n = 2L))))) %>% 
+  ungroup()
+
+
+#Realized Bipower Variation : Equation (8) of Lee & Mykland
+data <- data %>% 
+  group_by(data$SYM_ROOT) %>% 
+  mutate(BV = (1/((K-2))*rollapply(RV, FUN = sum, width=K, fill = NA, align = 'right'))) %>% 
+  ungroup()
+
+#Measure of Instantaneous Volatility: Equation (7) of Lee & Mykland ////// Double check if you need to square root it
+#Lstat <- data$ln_ret/(data$BV)
+Lstat <- data$ln_ret/sqrt(data$BV)
+#test <- cbind(Lstat,Lstat1)
+
+#Rejection Parameters : Equation (12) 
+#Equation (13) : C & S 
+#Should this adjust?
+n <- nrow(data)/4
+c <- 0.7979
+C_n <- sqrt(2*log(n))/c  - (log(pi)+log(log(n))) / (2*c*sqrt(2*log(n)))
+S_n <- 1/(c*sqrt(2*log(n)))
+
+#Rejection Parameters: If Equation (13) >  4.6001 then we reject the hypothesis of no jump at t_i at 1% level 
+Reject <- (Lstat - C_n)/S_n - 4.6001
+test1 <- cbind(data, Reject)
+
+test1$JumpTest <- ifelse(test1$Reject > 0, 1, 0)
+sum(test1$JumpTest, na.rm=TRUE)
+nrow(test1)
+#View a single day of Returns for an individual stock
+day <- test1 %>% 
+  filter(DATE == as.Date('2019-01-14'))
+
+#Plot
+plot(day$timeround, day$ln_ret, type='l', col = 'blue')
+lines(day$JumpTest, type = 'l')
+#Greater than 0.01
+greater <- day %>%  filter(ln_ret > 0.01) 
+lesser <- day %>%  filter(ln_ret < 0)
+
+lines(day$JumpTest, type= 'p', col = 'red' )
+plot(day$timeround, day$JumpTest, type = 's')
+sum(day$JumpTest, na.rm=TRUE)
+
+
+
+
+data$DATE <- as.Date(data$DATE,origin="1960-01-01")
+
+#Create time format reference - Must work with original nonformatted values
+time_ref <- as.data.frame(cbind('original' = data$timeround, 'formatted' = data$timeround))
+time_ref$formatted <- as.hms(time_ref$formatted)
+time_ref <- time_ref[1:392,1:2]
+
+
+#No negative prices, but several 0 bids/asks
+#Best to repeat previous value for missing numbers
+
+#Recode 0 to NA
+data <- data %>%
+  mutate(BID=replace(BID, BID<10, NA))
+data <- data %>% 
+  mutate(ASK=replace(ASK, ASK==0, NA))
+
+#Fill NA with previous values
+data <- data %>% 
+  group_by(SYM_ROOT) %>% 
+  fill(BID, .direction = 'up') %>% 
+  ungroup()
+
+data <- data %>% 
+  group_by(SYM_ROOT) %>% 
+  fill(ASK, .direction = 'up') %>% 
+  ungroup()
+
+#Create midpoint price
+midpoint <- (data$BID + data$ASK)/2
+data <- cbind(data,midpoint)
+
+#Create ln returns
+data <- data %>% 
+  group_by(SYM_ROOT) %>% 
+  mutate(ln_ret = log((midpoint)/lag(midpoint))) %>% 
+  ungroup()
+
+
+#Save R.file
+save(data, file = 'Final.RData')
