@@ -1,4 +1,4 @@
-# jumptest
+# JumpPrediction
 ##Predicting Abnormal Returns in Financial Markets
 
 The SAS macro pulls 1 minute returns for a specific stock from WRDS and appends these returns to a master file. To run the macro, input a beginning and end date in YYYYMMDD format. These dates must align with market open days, while any holidays/weekends between these days will be skipped. 
